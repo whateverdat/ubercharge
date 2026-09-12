@@ -1,1 +1,7 @@
 env/
+entities/
+managers/
+scenes/
+
+game.py
+settings.py
