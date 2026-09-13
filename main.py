@@ -3,6 +3,7 @@
 # =================================================================================================================
 from enum import Enum
 import random
+
 import pgzrun
 from pygame import Rect
 
@@ -31,6 +32,7 @@ class Game:
         self.debug.fps_counter(dt)
 
     def draw(self):
+        screen.clear()
         self.scene_manager.draw()
 
 # =================================================================================================================
@@ -54,6 +56,12 @@ class Scene:
         pass
 
     def on_key_down(self, key):
+        pass
+
+    def on_mouse_down(self, pos):
+        pass
+
+    def on_mouse_move(self, pos):
         pass
 
 # =================================================================================================================
@@ -96,7 +104,6 @@ class AudioManager:
     def __init__(self, master_volume = 1):
         self.master_volume = master_volume
 
-
     def play_sound(self, sound):
         audio = sounds.load(sound.sound_name)
         audio.set_volume((sound.volume * self.master_volume))
@@ -107,13 +114,153 @@ class AudioManager:
         audio.set_volume((0.1 * self.master_volume))
         audio.play()
 
+    def play_random_hit(self):
+        audio = sounds.load(f"hit/{str(random.randint(1, 4))}")
+        audio.set_volume((0.25 * self.master_volume))
+        audio.play()
+
     def play_track(self, sound):
         music.set_volume((sound.volume * self.master_volume))
         music.play(sound.sound_name)
 
 # =================================================================================================================
-# Game Scene
+# Start Scene
 # =================================================================================================================
+class StartScene(Scene):
+
+    def __init__(self, game):
+        super().__init__(game)
+        self.audio_manager = AudioManager()
+        self.camera = Camera()
+        self.background = GameActor("background", [WIDTH / 2, HEIGHT / 2], camera=self.camera)
+
+        self.shake_time = 0
+        self.shake_strength = 0
+        self.shake_duration = 0.5
+
+        self.title = TITLE
+        self.color_cycle = [
+            "#000000",
+            "#050505",
+            "#0A0A0A",
+            "#101010",
+            "#161616",
+            "#1C1C1C",
+            "#222222",
+            "#292929",
+            "#303030",
+            "#383838",
+            "#404040",
+            "#484848",
+            "#505050",
+            "#585858",
+            "#606060",
+        ]
+
+        self.distance = 0
+        self.movement_interval = 0.05
+        self.movement_elapsed = 0
+        self.movement_direction = True
+
+        self.wait_time = 3
+        self.current_wait_time = self.wait_time / 2
+
+    def __str__(self):
+        "START SCENE"
+
+    def _start_shake(self, strength=2):
+        self.shake_time = self.shake_duration
+        self.shake_strength = strength
+        self.camera.shake(2, 0.25)
+        self.audio_manager.play_random_hit()
+
+    def _animate_logo(self, dt):
+        self.camera.update(dt)
+                
+        if self.shake_time > 0:
+            self.shake_time -= dt
+            if (self.shake_time < 0):
+                self.current_wait_time = self.wait_time
+
+        elif (self.current_wait_time > 0):
+            self.current_wait_time -= dt
+
+        else:
+            self.movement_elapsed += dt
+            if self.movement_elapsed >= self.movement_interval:
+                self.movement_elapsed = 0
+
+                if self.movement_direction:
+                    self.distance += 1
+                    if self.distance >= len(self.color_cycle) - 1:
+                        self.movement_direction = False
+
+                else:
+                    self.distance -= 1
+                    if self.distance <= 0:
+                        self.movement_direction = True
+                        self._start_shake()
+
+    def update(self, dt):
+            self._animate_logo(dt)
+
+    def draw(self):
+        shake_x = 0
+        shake_y = 0
+
+        if self.shake_time > 0:
+            intensity = self.shake_strength * (self.shake_time / self.shake_duration)
+
+            shake_x = random.uniform(-intensity, intensity)
+            shake_y = random.uniform(-intensity, intensity)
+
+        self.background.draw()
+
+        screen.draw.text(
+            self.title,
+            center=(
+                WIDTH / 2 + shake_x,
+                HEIGHT / 4 + shake_y
+            ),
+            fontname="oleaguid",
+            fontsize=96,
+            color="whitesmoke",
+            gcolor="gainsboro",
+            shadow=(0, self.distance),
+            scolor=self.color_cycle[self.distance]
+        )
+
+# =================================================================================================================
+# Button
+# =================================================================================================================
+class Button:
+    def __init__(self, center, text = ""):
+        self.rect = Rect(0, 0, 250, 50)
+        self.rect.center = center
+        self.text = text
+        self.hovered = False
+
+    def update(self, mouse_pos):
+        self.hovered = self.rect.collidepoint(mouse_pos)
+
+    def draw(self):
+        color = "black" if self.hovered else "white"
+        
+        screen.draw.text(
+            self.text,
+            center=self.rect.center,
+            fontname="oleaguid",
+            fontsize=32,
+            color=color,
+            owidth=0 if self.hovered else 1,
+        )
+
+    def collidepoint(self, pos):
+        return self.rect.collidepoint(pos)
+
+# =================================================================================================================
+# Game Scene
+# ==================================================================================================================
 class GameScene(Scene):
 
     def __init__(self, game):
@@ -132,12 +279,50 @@ class GameScene(Scene):
         self.audio_manager.play_track(self.audio_manager.Sound.THEME)
 
         self.paused = False
+        self.upgrade_buttons = []
 
     def __str__(self):
         return "GAME SCENE"
+
+    @property
+    def choosing_upgrade(self):
+        return len(self.player.stats.upgrade_options) > 0
+
+    def _create_upgrade_buttons(self):
+        self.upgrade_buttons.clear()
+
+        upgrade_count = len(self.player.stats.upgrade_options)
+
+        for index, option in enumerate(self.player.stats.upgrade_options):
+            x = WIDTH / (upgrade_count + 1) * (index + 1)
+            y = HEIGHT / 10
+
+            self.upgrade_buttons.append(
+                Button((x, y), option.display_name)
+            )
+
+    def _draw_ui(self):
+        screen.draw.filled_rect(self.player._get_experience_rect(), "yellow")
+            
+        screen.draw.text(
+            f"{str(self.player.level)}", center=(WIDTH / 2, HEIGHT / 30), 
+            fontname="oleaguid", fontsize=32, color="white", owidth=1
+        )
+
+        screen.draw.text(
+            f"Press P to pause.", center=(WIDTH - WIDTH / 10, HEIGHT - HEIGHT / 30), 
+            fontname="oleaguid", fontsize=32, color="white", owidth=1
+        )
+
+        for button in self.upgrade_buttons:
+            button.draw()
     
     def update(self, dt):
-        if (self.paused): return
+        if (self.choosing_upgrade and len(self.upgrade_buttons) == 0):
+            self._create_upgrade_buttons()
+
+        if (self.paused or self.choosing_upgrade): return
+        
         self.player.update(keyboard, dt)
         self.enemy_manager.update(dt)
         self.projectile_manager.update(dt)
@@ -146,25 +331,32 @@ class GameScene(Scene):
     def on_key_down(self, key):
         if (key == key.P):
             self.paused = not self.paused
+        if (key == key.O):
+            self.player.stats.set_random_upgradable_stats()
+            self._create_upgrade_buttons()
 
+    def on_mouse_down(self, pos):
+        if (self.choosing_upgrade):
+
+            for index, button in enumerate(self.upgrade_buttons):
+                if button.collidepoint(pos):
+                    self.player.stats.increase_stat(self.player.stats.upgrade_options[index])
+                    
+                    self.player.stats.upgrade_options.clear()
+                    self.upgrade_buttons.clear()
+
+                    break
+
+    def on_mouse_move(self, pos):
+        for button in self.upgrade_buttons:
+            button.update(pos)
+        
     def draw(self):
-        screen.clear()
         self.background.draw()
         self.enemy_manager.draw()
         self.player.draw()        
         self.projectile_manager.draw()
         self._draw_ui()
-
-    def _draw_ui(self):
-        screen.draw.filled_rect(
-            self.player._get_experience_rect(),
-            "yellow"
-        )
-         
-        screen.draw.text(
-            f"{str(self.player.level)}", (WIDTH - 64, 8), 
-            fontname="oleaguid", fontsize=32, color="white",
-        )
 
 # =================================================================================================================
 # Enemy Manager
@@ -180,6 +372,8 @@ class EnemyManager():
             return self.name
 
     def __init__(self, audio_manager, player, camera):
+        self.enemy_classes = [SkullMonster, CuteMonster]
+
         self.enemies = []
         self.kill_list = set()
         self.audio_manager = audio_manager
@@ -205,12 +399,16 @@ class EnemyManager():
         self.left_spawner_moving_down = False if opposite else True
 
     def _spawn_enemy(self):
-        if (self.spawn_mode == self.SpawnMode.OPPOSITE or self.spawn_mode == self.SpawnMode.SYNCED):
-            self.enemies.append(CuteMonster(self._get_lane_position(self.right_spawner_lane, True), self.audio_manager, self.player, self.camera))
-            self.enemies.append(CuteMonster(self._get_lane_position(self.left_spawner_lane, False), self.audio_manager, self.player, self.camera))
-            self._update_lane_spawners()
-        elif (self.spawn_mode == self.SpawnMode.RANDOM_POSITION):
-            self.enemies.append(CuteMonster(self._get_random_position(), self.audio_manager, self.player, self.camera))
+        match self.spawn_mode:
+            case self.SpawnMode.SYNCED | self.SpawnMode.OPPOSITE:
+                self.enemies.append(self._get_random_enemy_class()(self._get_lane_position(self.right_spawner_lane, True), self.audio_manager, self.player, self.camera))
+                self.enemies.append(self._get_random_enemy_class()(self._get_lane_position(self.left_spawner_lane, False), self.audio_manager, self.player, self.camera))
+                self._update_lane_spawners()
+            case self.SpawnMode.RANDOM_POSITION:
+                self.enemies.append(self._get_random_enemy_class()(self._get_random_position(), self.audio_manager, self.player, self.camera))
+
+    def _get_random_enemy_class(self):
+        return random.choice(self.enemy_classes)
 
     def _update_lane_spawners(self):
         if (self.left_spawner_moving_down):
@@ -254,24 +452,30 @@ class EnemyManager():
         elif (self.spawn_mode == self.SpawnMode.SYNCED):
             self._set_spawners(False)
 
-        Debug.log(Debug.LogType.INFO, f"Enemy spawn mode was set to: {str(to)}.")
+        Debug.log(f"Enemy spawn mode was set to: {str(to)}.")
 
     def update(self, dt):
-        self.spawn_elapsed += dt
         self.spawn_mode_elapsed += dt
         if (self.spawn_mode_elapsed >= self.spawn_mode_interval):
             self.set_spawn_mode(random.choice(list(self.SpawnMode)))
             self.spawn_mode_elapsed = 0
+            
+        self.spawn_elapsed += dt
         if (self.spawn_elapsed >= self.spawn_interval):
             self.spawn_elapsed = 0
             self._spawn_enemy()
+
         for enemy in self.enemies:
             enemy.update(dt)
+            if (enemy.get_hitbox().colliderect(self.player.get_hitbox())):
+                self.player.take_hit(enemy)
             if (enemy.dead):
                 self._add_enemy_to_killist(enemy)
+
         for enemy in self.kill_list:
             if (enemy in self.enemies):
                 self.enemies.remove(enemy)
+
         self.kill_list.clear()
 
     def draw(self):
@@ -282,7 +486,7 @@ class EnemyManager():
 # Debug Settings 
 # =================================================================================================================
 class Debug:
-    active = True
+    active = False
     show_hitboxes = True
 
     # -----------------------------------------------------------------------------------------------------------------
@@ -311,7 +515,7 @@ class Debug:
         # -----------------------------------------------------------------------------------------------------------------
         # Scene info settings
         # -----------------------------------------------------------------------------------------------------------------
-        self.scene_info = True
+        self.scene_info = False
         self.update_interval = 1
         self.update_elapsed = 0
 
@@ -351,14 +555,14 @@ class Debug:
                 print("==================================================================================================")
 
     @classmethod
-    def log(cls, type, message):
+    def log(cls, message, type = LogType.INFO):
         if not cls.active: return 
 
         print(type, message)
 
     @classmethod
     def render_hit_or_collision_box(cls, rect):
-        if not cls.show_hitboxes: return
+        if not cls.show_hitboxes or not cls.active: return
         screen.draw.rect(rect, color="red")
 
 # =================================================================================================================
@@ -379,9 +583,11 @@ class Camera():
             )
             self.shake_time -= dt
         else:
+            self.shake_amount = 0
             self.offset = (0, 0)
 
     def shake(self, amount, duration):
+        if (amount < self.shake_amount): return
         self.shake_amount = amount
         self.shake_time = duration
 
@@ -418,26 +624,72 @@ class GameActor(Actor):
 class PlayerStats:
 
     class Stat(Enum):
-        MAX_HEALTH = (100, 500, 100)
-        DAMAGE = (1, 25, 1)
-        KNOCKBACK = (0, 200, 10)
-        PICK_UP_RANGE = (0, 500, 100)
-        CRIT_PROBABILITY = (0, 1, 0.1)
-        CRIT_MULTIPLIER = (1, 5, 1)
-        FIRING_INTERVAL = (0.2, 0.1, 0.05)
-        SPEED = (256, 512, 64)
-        BULLET_COUNT = (1, 8, 2)
+        """Stores the progression for each stat. Index 0 being start value and upgradable four times."""
+        MAX_HEALTH = ((100, 200, 300, 400, 500), "Max Health")
+        DAMAGE = ((1, 2, 3, 4, 5), "Damage")
+        KNOCKBACK = ((0, 100, 200, 300, 400), "Knockback")
+        PICK_UP_RANGE = ((50, 100, 150, 200, 250), "Pick Up Range")
+        CRIT_PROBABILITY = ((0, 0.25, 0.5, 0.75, 1), "Crit Probability")
+        CRIT_MULTIPLIER = ((1, 2, 3, 4, 5), "Crit Multiplier")
+        FIRING_INTERVAL = ((0.2, 0.175, 0.15, 0.125, 0.1), "Firing Speed")
+        SPEED = ((256, 320, 384, 448, 512), "Move Speed")
+        BULLET_COUNT = ((1, 2, 4, 6, 8), "Bullet Count")
+
+        def __init__(self, values, display_name):
+            self.values = values
+            self.start_value = values[0]
+            self.display_name = display_name
+
+    stat_attributes = {
+        Stat.MAX_HEALTH: "max_health",
+        Stat.DAMAGE: "damage",
+        Stat.KNOCKBACK: "knockback",
+        Stat.PICK_UP_RANGE: "pick_up_range",
+        Stat.CRIT_PROBABILITY: "crit_probability",
+        Stat.CRIT_MULTIPLIER: "crit_multiplier",
+        Stat.FIRING_INTERVAL: "firing_interval",
+        Stat.SPEED: "speed",
+        Stat.BULLET_COUNT: "bullet_count",
+    }
 
     def __init__(self):
-        self.max_health = 100
-        self.damage = 1
-        self.knockback = 0 #100
-        self.pick_up_range = 0
-        self.crit_probability = 0.25
-        self.crit_multiplier = 2.0
-        self.firing_interval = 0.2
-        self.speed = 256
-        self.bullet_count = 1
+        self.all_stats = list(self.Stat)
+
+        self.max_health = self.Stat.MAX_HEALTH.start_value
+        self.damage = self.Stat.DAMAGE.start_value
+        self.knockback = self.Stat.KNOCKBACK.start_value
+        self.pick_up_range = self.Stat.PICK_UP_RANGE.start_value
+        self.crit_probability = self.Stat.CRIT_PROBABILITY.start_value
+        self.crit_multiplier = self.Stat.CRIT_MULTIPLIER.start_value
+        self.firing_interval = self.Stat.FIRING_INTERVAL.start_value
+        self.speed = self.Stat.SPEED.start_value
+        self.bullet_count = self.Stat.BULLET_COUNT.start_value
+
+        self.upgrade_options = []
+
+    def increase_stat(self, stat):
+        if (not isinstance(stat, self.Stat)): return
+        attribute = self.stat_attributes[stat]
+        current_value = getattr(self, attribute)
+
+        current_level = stat.values.index(current_value)
+        if current_level >= len(stat.values) - 1:
+            return
+        
+        new_value = stat.values[current_level + 1]
+
+        setattr(self, attribute, new_value)
+
+        Debug.log(f"{stat} was increased from {current_value} to {new_value}.")
+
+    def set_random_upgradable_stats(self, count=3):
+        upgradable_stats = [
+            stat
+            for stat in self.all_stats
+            if getattr(self, self.stat_attributes[stat]) != stat.values[-1]
+        ]
+
+        self.upgrade_options = random.sample(upgradable_stats, min(count, len(upgradable_stats)))
 
 # =================================================================================================================
 # Player
@@ -454,6 +706,7 @@ class Player(GameActor):
         WALKING = ("walking/", 8)
         STANDING_SHOOTING = ("standing_shooting/", 8)
         WALKING_SHOOTING = ("walking_shooting/", 8)
+        HURT = ("hurt/", 2)
 
         def __init__(self, path, frame_count):
             self.path = path
@@ -468,6 +721,10 @@ class Player(GameActor):
     
     def __init__(self, projectile_manager, audio_manager, camera = None):
         self.state = Player.State.IDLE
+
+        self.hurt_time = 0
+        self.max_hurt_time = 0.5
+
         self.current_frame = 0
         self.facing_right = True
         self.animation_elapsed = 0
@@ -478,6 +735,7 @@ class Player(GameActor):
         self.audio_manager = audio_manager
 
         self.stats = PlayerStats()
+
         self.health = self.stats.max_health
         self.experience = 0
         self.experience_required = 15
@@ -514,7 +772,12 @@ class Player(GameActor):
             bar_width = self.SPRITE_WIDTH / 2
             bar_height = 8
             bar_x = self.x - bar_width / 2
-            bar_y = self.y + self.SPRITE_HEIGHT / 2 - bar_height - 4
+
+            # Move healthbar to top, if player is close to bottom
+            if (self.y > HEIGHT - self.SPRITE_HEIGHT / 2): 
+                bar_y = self.y - self.SPRITE_HEIGHT / 3 + bar_height + 4
+            else: 
+                bar_y = self.y + self.SPRITE_HEIGHT / 2 - bar_height - 4
 
             if (self.camera):
                 offset = self.camera.offset
@@ -532,20 +795,20 @@ class Player(GameActor):
             )
     
     def _get_experience_rect(self):
-            bar_width = WIDTH
-            bar_height = 12
-            bar_x = 0
-            bar_y = 0
-    
-            experience_percentage = self.experience / self.experience_required
-            health_width = bar_width * experience_percentage
-    
-            return Rect(
-                bar_x,
-                bar_y,
-                health_width,
-                bar_height
-            )
+        bar_width = WIDTH
+        bar_height = 12
+        bar_x = 0
+        bar_y = 0
+
+        experience_percentage = self.experience / self.experience_required
+        health_width = bar_width * experience_percentage
+
+        return Rect(
+            bar_x,
+            bar_y,
+            health_width,
+            bar_height
+        )
 
     def _reset_current_frame(self):
         self.current_frame = 0
@@ -558,6 +821,11 @@ class Player(GameActor):
 
     def _check_and_update_animation(self, to, reset):
         if (self.state == to): return
+
+        # Ensure that hurt animation is played while hurt 
+        if (self.hurt_time > 0):
+            return
+
         self.state = to
         if (reset): self._reset_current_frame()
 
@@ -571,12 +839,12 @@ class Player(GameActor):
             self.camera.shake(2, 0.25)
             self.weapon_cooldown = self.stats.firing_interval
 
-    def _animate(self, dt):
+    def _animate(self, dt):            
         self.animation_elapsed += dt
-        if (self.animation_elapsed > self.ANIMATION_INTERVAL):
+        if (self.animation_elapsed >= self.ANIMATION_INTERVAL):
             self.animation_elapsed = 0
-
             self.current_frame += 1
+            
             if (self.current_frame >= self.state.frame_count):
                 self.current_frame = 0
 
@@ -601,8 +869,8 @@ class Player(GameActor):
             length = (dx * dx + dy * dy) ** 0.5
             x = self.x + dx / length * self.stats.speed * dt
             y = self.y + dy / length * self.stats.speed * dt
-            self.x = max(self.rect.width / 2 + self.rect.x, min(WIDTH - self.rect.width / 2 + self.rect.x, x))
-            self.y = max(self.rect.height / 2 + self.rect.y, min(HEIGHT - self.rect.height / 2 + self.rect.y, y))
+            self.x = max(self.rect.width, min(WIDTH - self.rect.width, x))
+            self.y = max(self.rect.height / 3, min(HEIGHT - self.rect.height, y))
 
         else:
         
@@ -615,6 +883,15 @@ class Player(GameActor):
         Debug.render_hit_or_collision_box(self.get_hitbox())
         Debug.render_hit_or_collision_box(self.get_pick_up_rect())
 
+    def take_hit(self, enemy):
+        damage = enemy.get_damage()
+        if (damage > 0):
+            self.health -= damage
+            self._check_and_update_animation(self.State.HURT, True)
+            self.hurt_time = self.max_hurt_time
+            self.camera.shake(5, 0.25)
+            self.audio_manager.play_random_hit()
+
     def gain_experience(self, amount = 1):
         self.experience += amount
         if (self.experience >= self.experience_required):
@@ -622,6 +899,7 @@ class Player(GameActor):
             overflow = self.experience - self.experience_required
             self.experience = overflow
             self.experience_required = int(5 * self.level + 0.15 * self.level ** 2)
+            self.stats.set_random_upgradable_stats()
 
     def get_damage(self):
         return self.stats.damage if random.random() > self.stats.crit_probability else int(self.stats.damage * self.stats.crit_multiplier)
@@ -642,6 +920,9 @@ class Player(GameActor):
     def update(self, keyboard, dt):
             if self.weapon_cooldown > 0:
                 self.weapon_cooldown -= dt
+
+            if self.hurt_time > 0:
+                self.hurt_time -= dt
 
             self._update_shooting(keyboard)
             self._move(keyboard, dt)
@@ -846,9 +1127,9 @@ class ProjectileManager():
                 case 4:
                     projectile = Projectile(sprite, position, facing_right=False, facing_down=False, camera=camera)
                 case 5:
-                    projectile = Projectile(sprite, position, facing_right=False, facing_down=True, camera=camera)
-                case 6:
                     projectile = Projectile(sprite, position, facing_right=True, facing_down=True, camera=camera)
+                case 6:
+                    projectile = Projectile(sprite, position, facing_right=False, facing_down=True, camera=camera)
                 case 7:
                     projectile = Projectile(sprite, position, facing_right=True, facing_down=False, camera=camera)
                 case _:
@@ -870,7 +1151,7 @@ class ProjectileManager():
                     projectiles_to_destroy.add(projectile)
                     damage = self.player.get_damage()
                     if (enemy.take_hit(damage, self.player.stats.knockback)):
-                        self.experience_orbs.append(ExperienceOrb((enemy.x, enemy.y), self.player.camera))
+                        self.experience_orbs.append(ExperienceOrb((projectile.x, projectile.y), self.player.camera))
                     damage_text = DamageText([enemy.x, enemy.y], damage)
                     self.damage_texts.append(damage_text)
                     break
@@ -940,6 +1221,10 @@ class Enemy(GameActor):
 
         self.ANIMATION_INTERVAL = 0.1
 
+        self.DAMAGE_INTERVAL = 1
+        self.damage = 1
+        self.damage_elapsed = 0
+
         super().__init__(sprite, position, camera)
 
     @property 
@@ -972,28 +1257,6 @@ class Enemy(GameActor):
             bar_height
         )
 
-    def take_hit(self, damage, knockback = 0):
-        """Returns True if enemy dies, False otherwise"""
-        self.health -= damage
-        if (self.health <= 0):
-            self.marked_for_death = True
-            return True
-        self._knockback(knockback)
-        return False
-
-    def update(self, dt):
-        self._animate(dt)
-        if (self.marked_for_death):
-            if (self.state != self.State.DEATH): 
-                self.state = self.State.DEATH
-                self.reset_current_frame()
-                self.audio_manager.play_random_death()
-                
-        else: 
-            self._move(dt)
-            self._apply_knockback(dt)
-            self._check_if_left_screen()
-
     def _animate(self, dt):
         self.animation_elapsed += dt
         if (self.animation_elapsed > self.ANIMATION_INTERVAL):
@@ -1007,7 +1270,14 @@ class Enemy(GameActor):
             self.image = self.active_frame_path
 
     def _check_if_left_screen(self):
-        if ((self.x > WIDTH and self.facing_right) or (self.x < 0 and not self.facing_right)):
+        # Checks if enemy is pushed out of boundary by the player with knockback
+        if (self.knockback_velocity != 0) and (self.x > WIDTH + self.SPRITE_WIDTH / 2 or self.x < -self.SPRITE_WIDTH / 2):
+            self.marked_for_death = True
+            # Immediately award player the experience, since experience orbs will not spawn out of bounds
+            self.player.gain_experience() 
+
+        # Checks if enemy got out of bounds on its own and just despawn
+        elif ((self.x > WIDTH and self.facing_right) or (self.x < 0 and not self.facing_right)):
             self.dead = True
 
     def _move(self, dt):
@@ -1029,12 +1299,46 @@ class Enemy(GameActor):
             if (self.knockback_velocity > 0):
                 self.knockback_velocity = 0
 
+    def get_damage(self):
+        if (self.damage_elapsed > 0 or self.marked_for_death or self.dead):
+            return 0
+        else:
+            self.damage_elapsed = self.DAMAGE_INTERVAL 
+            return self.damage
+
+    def take_hit(self, damage, knockback = 0):
+        """Returns True if enemy dies, False otherwise"""
+        self.health -= damage
+        if (self.health <= 0):
+            self.marked_for_death = True
+            return True
+        self._knockback(knockback)
+        return False
+
     def get_hitbox(self):
             return Rect(self.x + self.rect.x, self.y + self.rect.y, self.rect.width, self.rect.height)
 
     def reset_current_frame(self):
             self.current_frame = 0
             self.animation_elapsed = self.ANIMATION_INTERVAL # This will initiate animation update on next call.
+
+    def update(self, dt):
+        if (self.damage_elapsed > 0):
+            self.damage_elapsed -= dt
+            if (self.damage_elapsed < 0):
+                self.damage_elapsed = 0
+
+        self._animate(dt)
+        if (self.marked_for_death):
+            if (self.state != self.State.DEATH): 
+                self.state = self.State.DEATH
+                self.reset_current_frame()
+                self.audio_manager.play_random_death()
+                
+        else: 
+            self._move(dt)
+            self._apply_knockback(dt)
+            self._check_if_left_screen()
 
     def draw(self):
         if self.x < 0 - self.SPRITE_WIDTH / 4:
@@ -1107,6 +1411,7 @@ class CuteMonster(Enemy):
         self.STARTING_SPRITE = self.active_frame_path
         super().__init__(self.STARTING_SPRITE, position, self.facing_right, player, camera)
         self.rect = Rect(-32, -16, 64, 64)
+        self.speed = 96
 
 # =================================================================================================================
 # Pgzero callbacks
@@ -1121,5 +1426,11 @@ def draw():
 
 def on_key_down(key):
     game.scene_manager.current_scene.on_key_down(key)
+
+def on_mouse_down(pos):
+    game.scene_manager.current_scene.on_mouse_down(pos)
+
+def on_mouse_move(pos):
+    game.scene_manager.current_scene.on_mouse_move(pos)
 
 pgzrun.go()
