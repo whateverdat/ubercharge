@@ -3,6 +3,7 @@
 # =================================================================================================================
 from enum import Enum
 import random
+import sys
 
 import pgzrun
 from pygame import Rect
@@ -14,17 +15,17 @@ WIDTH = 1280
 HEIGHT = 720
 FULLSCREEN = False
 RESIZABLE = False
-TITLE = "UBERCHARGE'd!"
+TITLE = "UBERCHARGE"
 
 # =================================================================================================================
 # Game 
 # =================================================================================================================
 class Game:
-
+    
     def __init__(self):
         self.debug = Debug(self)
         self.scene_manager = SceneManager(self)
-        self.scene_manager.change_scene(GameScene(self))
+        self.scene_manager.change_scene(StartScene(self))
 
     def update(self, dt):
         self.scene_manager.update(dt)
@@ -93,45 +94,78 @@ class SceneManager:
 # =================================================================================================================
 class AudioManager:
 
+    # Need this to be class variable, because each scene creates a new AudioManager instance.
+    currently_playing_track = None
+    master_volume = 1
+
+    @classmethod
+    def change_master(cls):
+        master_step = 0.25
+        cls.master_volume += master_step
+        if (cls.master_volume > 1):
+            cls.master_volume = 0
+
     class Sound(Enum):
         WEAPON = ("weapon", 0.1)
         THEME = ("osmotic_memory", 0.25)
+        GAME = ("echoes_of_yesterday_loop_drumless", 0.25)
+        WIN = ("win", 0.25)
+        LOSE = ("lose", 0.25)
 
         def __init__(self, name, volume):
             self.sound_name = name
             self.volume = volume
 
-    def __init__(self, master_volume = 1):
-        self.master_volume = master_volume
+    def __init__(self):
+        pass
 
     def play_sound(self, sound):
         audio = sounds.load(sound.sound_name)
-        audio.set_volume((sound.volume * self.master_volume))
+        audio.set_volume((sound.volume * AudioManager.master_volume))
         audio.play()
 
     def play_random_death(self):
         audio = sounds.load("death/" + str(random.randint(1, 15)))
-        audio.set_volume((0.1 * self.master_volume))
+        audio.set_volume((0.1 * AudioManager.master_volume))
         audio.play()
 
     def play_random_hit(self):
         audio = sounds.load(f"hit/{str(random.randint(1, 4))}")
-        audio.set_volume((0.25 * self.master_volume))
+        audio.set_volume((0.25 * AudioManager.master_volume))
         audio.play()
 
     def play_track(self, sound):
-        music.set_volume((sound.volume * self.master_volume))
+        music.set_volume((sound.volume * AudioManager.master_volume))
         music.play(sound.sound_name)
+        AudioManager.currently_playing_track = sound
+
+    def stop_track(self):
+        music.stop()
+        AudioManager.currently_playing_track = None
+
+    def update_master(self):
+        music.set_volume((self.currently_playing_track.volume * AudioManager.master_volume))
 
 # =================================================================================================================
 # Start Scene
 # =================================================================================================================
 class StartScene(Scene):
 
+    class State(Enum):
+        START = (["Start", "Options", "Credits", "Quit"])
+        OPTIONS = (["Back", "Screen Shake: ", "Audio: ", "Difficulty: "])
+        CREDITS = (["Back"])
+
+        def __init__(self, options):
+            self.options = options
+
     def __init__(self, game):
         super().__init__(game)
-        self.audio_manager = AudioManager()
+
         self.camera = Camera()
+        self.audio_manager = AudioManager()
+        self.audio_manager.play_track(self.audio_manager.Sound.THEME)
+
         self.background = GameActor("background", [WIDTH / 2, HEIGHT / 2], camera=self.camera)
 
         self.shake_time = 0
@@ -165,8 +199,28 @@ class StartScene(Scene):
         self.wait_time = 3
         self.current_wait_time = self.wait_time / 2
 
+        self.state = self.State.START
+        self.menu_options = []
+        self.menu_buttons = []
+        self._set_state(self.State.START)
+
     def __str__(self):
-        "START SCENE"
+        return "START SCENE"
+
+    def _set_state(self, to):
+        if (not isinstance(to, self.State)): return
+        self.state = to
+        self.menu_options = self.state.options
+        self._create_buttons()
+
+    def _create_buttons(self):
+        self.menu_buttons.clear()
+        start_y = HEIGHT / 2
+        y_increment = 75
+        for index, option in enumerate(self.menu_options):
+            self.menu_buttons.append(Button(
+                (WIDTH / 2, start_y + y_increment * index), option
+            ))
 
     def _start_shake(self, strength=2):
         self.shake_time = self.shake_duration
@@ -202,9 +256,9 @@ class StartScene(Scene):
                         self._start_shake()
 
     def update(self, dt):
-            self._animate_logo(dt)
+        self._animate_logo(dt)
 
-    def draw(self):
+    def draw(self):    
         shake_x = 0
         shake_y = 0
 
@@ -230,6 +284,61 @@ class StartScene(Scene):
             scolor=self.color_cycle[self.distance]
         )
 
+        for index, button in enumerate(self.menu_buttons):
+            if (self.state == self.State.OPTIONS):
+                if (index == 1):
+                    button.text = f"Screen Shake: {"ON" if Camera.shake_active else "OFF"}"
+                elif (index == 2):
+                    button.text = f"Audio: {str(int(AudioManager.master_volume * 100))}%"
+                elif (index == 3):
+                    button.text = f"Difficulty: {GameScene.difficulties[GameScene.difficulty]}"
+            button.draw()
+
+    def on_mouse_move(self, position):
+        for button in self.menu_buttons:
+            button.update(position)
+
+    def on_mouse_down(self, pos):
+        for index, button in enumerate(self.menu_buttons):
+            if button.collidepoint(pos):
+                match self.menu_options[index]:
+
+                    # ----------------------------------------------------------------------------------------------
+                    # Start state options
+                    # ----------------------------------------------------------------------------------------------
+                    case "Start":
+                        self.game.scene_manager.change_scene(GameScene(self.game))
+
+                    case "Options":
+                        self._set_state(self.State.OPTIONS)
+
+                    case "Credits":
+                        self._set_state(self.State.CREDITS)
+                
+                    case "Quit":
+                        sys.exit()
+
+                    # ----------------------------------------------------------------------------------------------
+                    # Options state options
+                    # ----------------------------------------------------------------------------------------------
+                    case "Screen Shake: ":
+                        Camera.shake_active = not Camera.shake_active
+
+                    case "Audio: ":
+                        AudioManager.change_master()
+                        self.audio_manager.update_master()
+
+                    case "Difficulty: ":
+                        GameScene.change_difficulty()
+
+                    # Shared between options and credits
+                    case "Back":
+                        self._set_state(self.State.START)
+
+                    case _:
+                        pass
+                    
+
 # =================================================================================================================
 # Button
 # =================================================================================================================
@@ -244,15 +353,14 @@ class Button:
         self.hovered = self.rect.collidepoint(mouse_pos)
 
     def draw(self):
-        color = "black" if self.hovered else "white"
-        
+        color = "yellow" if self.hovered else "white"
         screen.draw.text(
             self.text,
             center=self.rect.center,
             fontname="oleaguid",
             fontsize=32,
             color=color,
-            owidth=0 if self.hovered else 1,
+            owidth=1
         )
 
     def collidepoint(self, pos):
@@ -263,11 +371,25 @@ class Button:
 # ==================================================================================================================
 class GameScene(Scene):
 
+    difficulties = ["Easy", "Normal", "Hard"]
+    difficulty = 1
+
+    @classmethod
+    def get_difficulty(cls):
+        return cls.difficulties[cls.difficulty]
+
+    @classmethod
+    def change_difficulty(cls):
+        cls.difficulty += 1
+        if (cls.difficulty >= len(cls.difficulties)):
+            cls.difficulty = 0
+
     def __init__(self, game):
         super().__init__(game)
 
         self.camera = Camera()
         self.audio_manager = AudioManager()
+
         self.enemy_manager = EnemyManager(self.audio_manager, None, self.camera)
         self.projectile_manager = ProjectileManager(self.enemy_manager)
         self.player = Player(self.projectile_manager, self.audio_manager, self.camera)
@@ -276,10 +398,12 @@ class GameScene(Scene):
         self.enemy_manager.player = self.player
         self.background = GameActor("background", [WIDTH / 2, HEIGHT / 2], camera=self.camera)
 
-        self.audio_manager.play_track(self.audio_manager.Sound.THEME)
+        self.audio_manager.play_track(self.audio_manager.Sound.GAME)
 
+        self.time_elapsed = 0
         self.paused = False
         self.upgrade_buttons = []
+        self.back_button = Button((WIDTH / 2, HEIGHT - HEIGHT / 10), "Back to main menu")
 
     def __str__(self):
         return "GAME SCENE"
@@ -295,14 +419,15 @@ class GameScene(Scene):
 
         for index, option in enumerate(self.player.stats.upgrade_options):
             x = WIDTH / (upgrade_count + 1) * (index + 1)
-            y = HEIGHT / 10
+            y = HEIGHT / 5
 
             self.upgrade_buttons.append(
                 Button((x, y), option.display_name)
             )
 
     def _draw_ui(self):
-        screen.draw.filled_rect(self.player._get_experience_rect(), "yellow")
+        screen.draw.filled_rect(self.player.get_experience_rect(), "yellow")
+        screen.draw.filled_rect(self.player.get_ubercharge_rect(), "red")
             
         screen.draw.text(
             f"{str(self.player.level)}", center=(WIDTH / 2, HEIGHT / 30), 
@@ -310,18 +435,60 @@ class GameScene(Scene):
         )
 
         screen.draw.text(
-            f"Press P to pause.", center=(WIDTH - WIDTH / 10, HEIGHT - HEIGHT / 30), 
+            f"ESC to pause/unpause", center=(WIDTH - WIDTH / 8, HEIGHT - HEIGHT / 30), 
             fontname="oleaguid", fontsize=32, color="white", owidth=1
         )
 
-        for button in self.upgrade_buttons:
-            button.draw()
+        screen.draw.text(
+            f"{str(int(self.time_elapsed))}", center=(WIDTH / 2, HEIGHT - HEIGHT / 30), 
+            fontname="oleaguid", fontsize=32, color="white", owidth=1
+        )
+
+
+        if (self.choosing_upgrade):
+            screen.draw.text(
+                f"Choose an upgrade:", center=(WIDTH / 2, HEIGHT / 10), 
+                fontname="oleaguid", fontsize=32, color="white", owidth=1
+            )
+            self._draw_stat_information()
+            for button in self.upgrade_buttons:
+                button.draw()
+            
+        if (self.paused): 
+            self._draw_stat_information()
+            screen.draw.text(
+                f"PAUSED", center=(WIDTH / 2, HEIGHT / 10), 
+                fontname="oleaguid", fontsize=32, color="white", owidth=1
+            )
+            self.back_button.draw()
+
+    def _draw_stat_information(self):
+        for index, stat in enumerate(self.player.stats.all_stats):
+            column = index % 3
+            row = index // 3
+
+            screen.draw.text(
+                f"{stat.display_name}: {stat.values.index(getattr(self.player.stats, PlayerStats.stat_attributes[stat]))}",
+                center=(
+                    WIDTH / 4 + column * (WIDTH / 4),
+                    HEIGHT / 3 + row * 100
+                ),
+                fontname="oleaguid",
+                fontsize=32,
+                color="white",
+                owidth=1
+            )
     
     def update(self, dt):
         if (self.choosing_upgrade and len(self.upgrade_buttons) == 0):
             self._create_upgrade_buttons()
 
         if (self.paused or self.choosing_upgrade): return
+
+        self.time_elapsed += dt
+
+        if (self.player.check_game_over()):
+            self.game.scene_manager.change_scene(TitleScene(self.game, self.time_elapsed, True if self.player.health > 0 else False))
         
         self.player.update(keyboard, dt)
         self.enemy_manager.update(dt)
@@ -329,11 +496,10 @@ class GameScene(Scene):
         self.camera.update(dt)
 
     def on_key_down(self, key):
-        if (key == key.P):
+        if (key == key.ESCAPE):
             self.paused = not self.paused
         if (key == key.O):
-            self.player.stats.set_random_upgradable_stats()
-            self._create_upgrade_buttons()
+            self.player.gain_experience(self.player.experience_required)
 
     def on_mouse_down(self, pos):
         if (self.choosing_upgrade):
@@ -346,10 +512,16 @@ class GameScene(Scene):
                     self.upgrade_buttons.clear()
 
                     break
+        if (self.paused):
+            if (self.back_button.collidepoint(pos)):
+                self.game.scene_manager.change_scene(StartScene(self.game))
 
     def on_mouse_move(self, pos):
         for button in self.upgrade_buttons:
             button.update(pos)
+
+        if (self.paused): 
+            self.back_button.update(pos)
         
     def draw(self):
         self.background.draw()
@@ -357,6 +529,50 @@ class GameScene(Scene):
         self.player.draw()        
         self.projectile_manager.draw()
         self._draw_ui()
+
+# =================================================================================================================
+# Title Scene
+# ==================================================================================================================
+class TitleScene(Scene):
+    def __init__(self, game, time, win):
+        super().__init__(game)
+
+        self.camera = Camera()
+        self.audio_manager = AudioManager()
+
+        self.win = win
+        self.audio_manager.stop_track()
+        self.audio_manager.play_sound(self.audio_manager.Sound.WIN if win else self.audio_manager.Sound.LOSE)
+        self.time = time
+
+        self.background = GameActor("background", [WIDTH / 2, HEIGHT / 2], camera=self.camera)
+        self.back_button = Button((WIDTH / 2, HEIGHT - HEIGHT / 10), "Back to main menu")
+
+    def draw(self):
+        self.background.draw()
+        if (self.win):
+            screen.draw.text(
+                f"YOU WIN!", center=(WIDTH / 2, HEIGHT / 10), 
+                fontname="oleaguid", fontsize=96, color="white", owidth=1
+            )
+            screen.draw.text(
+                f"Your time: {self.time:.3f}s", center=(WIDTH / 2, HEIGHT / 2), 
+                fontname="oleaguid", fontsize=64, color="white", owidth=1
+            )
+        else:
+            screen.draw.text(
+                f"GAME OVER!", center=(WIDTH / 2, HEIGHT / 2), 
+                fontname="oleaguid", fontsize=96, color="white", owidth=1
+            )
+
+        self.back_button.draw()
+
+    def on_mouse_down(self, pos):
+        if (self.back_button.collidepoint(pos)):
+            self.game.scene_manager.change_scene(StartScene(self.game))
+
+    def on_mouse_move(self, pos):
+        self.back_button.update(pos)
 
 # =================================================================================================================
 # Enemy Manager
@@ -383,7 +599,8 @@ class EnemyManager():
         self.spawn_mode_interval = 5
         self.spawn_mode_elapsed = 0
 
-        self.spawn_interval = 2
+        self.base_spawn_interval = 1
+        self.min_spawn_interval = 0.1
         self.spawn_elapsed = 0
         self.camera = camera
 
@@ -391,7 +608,11 @@ class EnemyManager():
         self.LANE_COUNT = 10
 
         self.set_spawn_mode(self.SpawnMode.OPPOSITE)
-        
+
+    def _get_spawn_interval(self):
+        if self.player.stats.ubercharge: return self.min_spawn_interval
+        return self.base_spawn_interval - ((self.player.level - 1) * (self.base_spawn_interval - self.min_spawn_interval) / self.player.level_cap)
+    
     def _set_spawners(self, opposite):
         self.right_spawner_lane = self.LANE_COUNT / 2
         self.left_spawner_lane = self.LANE_COUNT / 2
@@ -405,7 +626,13 @@ class EnemyManager():
                 self.enemies.append(self._get_random_enemy_class()(self._get_lane_position(self.left_spawner_lane, False), self.audio_manager, self.player, self.camera))
                 self._update_lane_spawners()
             case self.SpawnMode.RANDOM_POSITION:
-                self.enemies.append(self._get_random_enemy_class()(self._get_random_position(), self.audio_manager, self.player, self.camera))
+                random_positions = []
+                while (len(random_positions) < 2):
+                    position = self._get_random_position()
+                    if position not in random_positions:
+                        random_positions.append(position)
+                self.enemies.append(self._get_random_enemy_class()(random_positions[0], self.audio_manager, self.player, self.camera))
+                self.enemies.append(self._get_random_enemy_class()(random_positions[1], self.audio_manager, self.player, self.camera))
 
     def _get_random_enemy_class(self):
         return random.choice(self.enemy_classes)
@@ -461,7 +688,7 @@ class EnemyManager():
             self.spawn_mode_elapsed = 0
             
         self.spawn_elapsed += dt
-        if (self.spawn_elapsed >= self.spawn_interval):
+        if (self.spawn_elapsed >= self._get_spawn_interval()):
             self.spawn_elapsed = 0
             self._spawn_enemy()
 
@@ -500,6 +727,15 @@ class Debug:
         def __str__(self):
             return f"[{self.name}]"
 
+    @classmethod
+    def log(cls, message, type = LogType.INFO):
+        if not cls.active: return     
+        print(type, message)
+    
+    @classmethod
+    def render_hit_or_collision_box(cls, rect):
+        if not cls.show_hitboxes or not cls.active: return
+        screen.draw.rect(rect, color="red")
 
     def __init__(self, game):
         self.game = game
@@ -554,29 +790,20 @@ class Debug:
                         print(f"[{str(current_scene)}] Enemy Count: {str(len(current_scene.enemy_manager.enemies))}")
                 print("==================================================================================================")
 
-    @classmethod
-    def log(cls, message, type = LogType.INFO):
-        if not cls.active: return 
-
-        print(type, message)
-
-    @classmethod
-    def render_hit_or_collision_box(cls, rect):
-        if not cls.show_hitboxes or not cls.active: return
-        screen.draw.rect(rect, color="red")
-
 # =================================================================================================================
 # Camera
 # =================================================================================================================
 class Camera():
+    shake_active = True
 
     def __init__(self):
+
         self.offset = (0, 0)
         self.shake_time = 0
         self.shake_amount = 0
 
     def update(self, dt):
-        if self.shake_time > 0:
+        if (self.shake_time > 0 and Camera.shake_active):
             self.offset = (
                 random.randint(-self.shake_amount, self.shake_amount),
                 random.randint(-self.shake_amount, self.shake_amount)
@@ -587,7 +814,7 @@ class Camera():
             self.offset = (0, 0)
 
     def shake(self, amount, duration):
-        if (amount < self.shake_amount): return
+        if (amount < self.shake_amount or not Camera.shake_active): return
         self.shake_amount = amount
         self.shake_time = duration
 
@@ -625,7 +852,7 @@ class PlayerStats:
 
     class Stat(Enum):
         """Stores the progression for each stat. Index 0 being start value and upgradable four times."""
-        MAX_HEALTH = ((100, 200, 300, 400, 500), "Max Health")
+        MAX_HEALTH = ((10, 20, 30, 40, 50), "Max Health")
         DAMAGE = ((1, 2, 3, 4, 5), "Damage")
         KNOCKBACK = ((0, 100, 200, 300, 400), "Knockback")
         PICK_UP_RANGE = ((50, 100, 150, 200, 250), "Pick Up Range")
@@ -638,6 +865,7 @@ class PlayerStats:
         def __init__(self, values, display_name):
             self.values = values
             self.start_value = values[0]
+            self.ubercharge_value = values[-1]
             self.display_name = display_name
 
     stat_attributes = {
@@ -652,8 +880,10 @@ class PlayerStats:
         Stat.BULLET_COUNT: "bullet_count",
     }
 
-    def __init__(self):
+    def __init__(self, player):
+        self.player = player
         self.all_stats = list(self.Stat)
+        self.ubercharge = False
 
         self.max_health = self.Stat.MAX_HEALTH.start_value
         self.damage = self.Stat.DAMAGE.start_value
@@ -667,6 +897,11 @@ class PlayerStats:
 
         self.upgrade_options = []
 
+    def get_stat(self, stat):
+        attribute = self.stat_attributes[stat]
+        if (self.ubercharge and stat != self.Stat.MAX_HEALTH): return stat.ubercharge_value
+        return getattr(self, attribute)
+
     def increase_stat(self, stat):
         if (not isinstance(stat, self.Stat)): return
         attribute = self.stat_attributes[stat]
@@ -679,6 +914,7 @@ class PlayerStats:
         new_value = stat.values[current_level + 1]
 
         setattr(self, attribute, new_value)
+        if (stat == self.Stat.MAX_HEALTH): self.player.heal()
 
         Debug.log(f"{stat} was increased from {current_value} to {new_value}.")
 
@@ -734,14 +970,20 @@ class Player(GameActor):
         self.rect = Rect(-16, -8, 24, 48) # This will be the hitbox, x and y are offsets from the spirte centre
         self.audio_manager = audio_manager
 
-        self.stats = PlayerStats()
+        self.stats = PlayerStats(self)
 
-        self.health = self.stats.max_health
+        self.health = self.stats.get_stat(self.stats.Stat.MAX_HEALTH)
         self.experience = 0
         self.experience_required = 15
         self.level = 1
+        self.level_cap = 40
+        self.ubercharge = 0
+        self.base_ubercharge_decay = 5
+        self.ubercharge_increase = 5
+        self.base_ubercharge_required = 50
 
         self.projectile_sprite = "projectile/pistol_bullet"
+        self.ubercharge_projectile_sprite = "projectile/ricochet_bullet"
 
         self.SPRITE_BASE_LOCATION = "player/"
         self.STARTING_SPRITE = self.active_frame_path
@@ -768,6 +1010,23 @@ class Player(GameActor):
     # -----------------------------------------------------------------------------------------------------------------
     # Player methods
     # -----------------------------------------------------------------------------------------------------------------
+    def _get_ubercharge_required(self):
+        return self.base_ubercharge_required + ((self.level - 1) * 10)
+
+    def _get_ubercharge_decay(self):
+        match GameScene.get_difficulty():
+            case "Easy":
+                return self.base_ubercharge_decay
+
+            case "Normal":
+                return max(self.base_ubercharge_decay, self._get_ubercharge_required() / ((self.base_ubercharge_required / self.base_ubercharge_decay) * 2))
+
+            case "Hard":
+                return max(self.base_ubercharge_decay, self._get_ubercharge_required() / (self.base_ubercharge_required / self.base_ubercharge_decay))
+            
+            case _:
+                return self.base_ubercharge_decay
+                
     def _get_healthbar_rect(self):
             bar_width = self.SPRITE_WIDTH / 2
             bar_height = 8
@@ -784,7 +1043,7 @@ class Player(GameActor):
                 bar_x += offset[0]
                 bar_y += offset[1]
     
-            health_percentage = self.health / self.stats.max_health
+            health_percentage = self.health / self.stats.get_stat(self.stats.Stat.MAX_HEALTH)
             health_width = bar_width * health_percentage
     
             return Rect(
@@ -793,8 +1052,15 @@ class Player(GameActor):
                 health_width,
                 bar_height
             )
+
+    def heal(self):
+        self.health = self.stats.get_stat(self.stats.Stat.MAX_HEALTH)
     
-    def _get_experience_rect(self):
+    def gain_ubercharge(self):
+        if (self.stats.ubercharge): return
+        self.ubercharge += self.ubercharge_increase
+    
+    def get_experience_rect(self):
         bar_width = WIDTH
         bar_height = 12
         bar_x = 0
@@ -807,6 +1073,22 @@ class Player(GameActor):
             bar_x,
             bar_y,
             health_width,
+            bar_height
+        )
+
+    def get_ubercharge_rect(self):
+        bar_width = WIDTH
+        bar_height = 12
+        bar_x = 0
+        bar_y = HEIGHT - bar_height
+
+        ubercharge_percentage = self.ubercharge / self._get_ubercharge_required()
+        ubercharge_width = bar_width * ubercharge_percentage
+
+        return Rect(
+            bar_x,
+            bar_y,
+            ubercharge_width,
             bar_height
         )
 
@@ -834,10 +1116,10 @@ class Player(GameActor):
         if (self.shooting):
             self.audio_manager.play_sound(self.audio_manager.Sound.WEAPON)
             self.projectile_manager.create_projectile(
-                self.projectile_sprite, [self.x + self.MUZZLE_OFFSET[0], self.y + self.MUZZLE_OFFSET[1]], self.facing_right, self.camera, self.stats.bullet_count
+                self.ubercharge_projectile_sprite if self.stats.ubercharge else self.projectile_sprite, [self.x + self.MUZZLE_OFFSET[0], self.y + self.MUZZLE_OFFSET[1]], self.facing_right, self.camera, self.stats.get_stat(self.stats.Stat.BULLET_COUNT)
             )
             self.camera.shake(2, 0.25)
-            self.weapon_cooldown = self.stats.firing_interval
+            self.weapon_cooldown = self.stats.get_stat(self.stats.Stat.FIRING_INTERVAL)
 
     def _animate(self, dt):            
         self.animation_elapsed += dt
@@ -867,8 +1149,8 @@ class Player(GameActor):
                 self._check_and_update_animation(Player.State.WALKING, True)
 
             length = (dx * dx + dy * dy) ** 0.5
-            x = self.x + dx / length * self.stats.speed * dt
-            y = self.y + dy / length * self.stats.speed * dt
+            x = self.x + dx / length * self.stats.get_stat(self.stats.Stat.SPEED) * dt
+            y = self.y + dy / length * self.stats.get_stat(self.stats.Stat.SPEED) * dt
             self.x = max(self.rect.width, min(WIDTH - self.rect.width, x))
             self.y = max(self.rect.height / 3, min(HEIGHT - self.rect.height, y))
 
@@ -884,6 +1166,7 @@ class Player(GameActor):
         Debug.render_hit_or_collision_box(self.get_pick_up_rect())
 
     def take_hit(self, enemy):
+        if (self.stats.ubercharge): return
         damage = enemy.get_damage()
         if (damage > 0):
             self.health -= damage
@@ -902,7 +1185,7 @@ class Player(GameActor):
             self.stats.set_random_upgradable_stats()
 
     def get_damage(self):
-        return self.stats.damage if random.random() > self.stats.crit_probability else int(self.stats.damage * self.stats.crit_multiplier)
+        return self.stats.get_stat(self.stats.Stat.DAMAGE) if random.random() > self.stats.get_stat(self.stats.Stat.CRIT_PROBABILITY) else int(self.stats.get_stat(self.stats.Stat.DAMAGE) * self.stats.get_stat(self.stats.Stat.CRIT_MULTIPLIER))
 
     def get_hitbox(self):
         return Rect(
@@ -913,16 +1196,26 @@ class Player(GameActor):
     def get_pick_up_rect(self):
         hitbox = self.get_hitbox()
         return Rect(
-            hitbox.x - self.stats.pick_up_range, hitbox.y - self.stats.pick_up_range,
-            hitbox.width + self.stats.pick_up_range * 2, hitbox.height + self.stats.pick_up_range * 2
+            hitbox.x - self.stats.get_stat(self.stats.Stat.PICK_UP_RANGE), hitbox.y - self.stats.get_stat(self.stats.Stat.PICK_UP_RANGE),
+            hitbox.width + self.stats.get_stat(self.stats.Stat.PICK_UP_RANGE) * 2, hitbox.height + self.stats.get_stat(self.stats.Stat.PICK_UP_RANGE) * 2
         )
 
+    def check_game_over(self):
+        return (self.health <= 0 or self.level >= self.level_cap)
+    
     def update(self, keyboard, dt):
             if self.weapon_cooldown > 0:
                 self.weapon_cooldown -= dt
 
             if self.hurt_time > 0:
                 self.hurt_time -= dt
+
+            if (self.ubercharge > 0):
+                if (not self.stats.ubercharge and self.ubercharge >= self._get_ubercharge_required()):
+                    self.stats.ubercharge = True
+                self.ubercharge -= self._get_ubercharge_decay() * dt
+            else:
+                self.stats.ubercharge = False
 
             self._update_shooting(keyboard)
             self._move(keyboard, dt)
@@ -934,6 +1227,9 @@ class Player(GameActor):
         self._get_healthbar_rect(),
             "red"
         )
+        if (self.stats.ubercharge):
+            ubercharge_sprite = GameActor(f"player/ubercharge/{self.current_frame + 1}", (self.x + (-4 if self.facing_right else 4), self.y))
+            ubercharge_sprite.draw()
         super().draw()
 
 # =================================================================================================================
@@ -954,7 +1250,7 @@ class Projectile(GameActor):
             self.should_destroy = True
 
     def _draw_collision_box(self):
-            Debug.render_hit_or_collision_box(self.get_hitbox())
+        Debug.render_hit_or_collision_box(self.get_hitbox())
     
     def get_hitbox(self):
         return Rect(self.x + self.rect.x, self.y + self.rect.y, self.rect.width, self.rect.height)
@@ -976,7 +1272,7 @@ class ExperienceOrb(GameActor):
 
     def __init__(self, starting_position, camera):
         self.STARTING_SPRITE = "projectile/pellet"
-        self.speed = 256
+        self.speed = 512
         self.should_destroy = False
         super().__init__(self.STARTING_SPRITE, starting_position, camera=camera)
 
@@ -1024,67 +1320,25 @@ class DamageText:
         self.damage = damage
         self.should_destroy = False
 
+        # https://pygame-zero.readthedocs.io/en/latest/colors_ref.html
+        self.colors = [
+            "whitesmoke", "lemonchiffon", "yellow", "gold", "orange", "darkorange", 
+            "orangered", "red", "firebrick", "darkred", "maroon", "violetred",
+            "mediumvioletred", "darkmagenta", "blueviolet", "darkviolet",
+            "mediumpurple", "mediumslateblue", "slateblue", "cornflowerblue",
+            "royalblue", "mediumblue", "darkblue", "navyblue", "midnightblue"
+        ]
+
         self.font_size_range = (64, 128)
         self.starting_font_size = random.randint(self.font_size_range[0], self.font_size_range[1])
         self.font_size = max(1, int(self.starting_font_size * self.time_left)) 
         self.gap = (self.starting_font_size - self.font_size) / 4
         self.font_color = self._determine_color(self.damage)
 
-    # https://pygame-zero.readthedocs.io/en/latest/colors_ref.html
     def _determine_color(self, damage):
-        match damage:
-            case 25:
-                return "midnightblue"       
-            case 24:
-                return "navyblue"           
-            case 23:
-                return "darkblue"           
-            case 22:
-                return "mediumblue"         
-            case 21:
-                return "royalblue"          
-            case 20:
-                return "cornflowerblue"     
-            case 19:
-                return "slateblue"          
-            case 18:
-                return "mediumslateblue"    
-            case 17:
-                return "mediumpurple"       
-            case 16:
-                return "darkviolet"         
-            case 15:
-                return "blueviolet"         
-            case 14:
-                return "darkmagenta"        
-            case 13:
-                return "mediumvioletred"    
-            case 12:
-                return "violetred"          
-            case 11:
-                return "maroon"             
-            case 10:
-                return "darkred"            
-            case 9:
-                return "firebrick"          
-            case 8:
-                return "red"                
-            case 7:
-                return "orangered"          
-            case 6:
-                return "darkorange"         
-            case 5:
-                return "orange"             
-            case 4:
-                return "gold"               
-            case 3:
-                return "yellow"             
-            case 2:
-                return "lemonchiffon"       
-            case 1:
-                return "whitesmoke"         
-            case _:
-                return "black"
+        if (damage > len(self.colors)):
+            return "black"
+        return self.colors[damage - 1]
         
     def update(self, dt):
         self.time_left -= dt
@@ -1096,7 +1350,7 @@ class DamageText:
     def draw(self):
         screen.draw.text(
             str(self.damage), (self.position[0] + self.gap, self.position[1] + self.gap * 2), 
-            fontname="oleaguid", fontsize=self.font_size, color=self.font_color, alpha=self.time_left
+            fontname="oleaguid", fontsize=self.font_size, color=self.font_color, alpha=max(0, min(1, self.time_left))
         )
 
 # =================================================================================================================
@@ -1136,6 +1390,10 @@ class ProjectileManager():
                     pass
             if (projectile): self.projectiles.append(projectile)
 
+    def create_damage_text(self, x, y, damage):
+        damage_text = DamageText([x, y], damage)
+        self.damage_texts.append(damage_text)
+
     def update(self, dt):
         self._update_projectiles(dt)
         self._update_damage_texts(dt)
@@ -1150,10 +1408,10 @@ class ProjectileManager():
                 if projectile.get_hitbox().colliderect(enemy.get_hitbox()):
                     projectiles_to_destroy.add(projectile)
                     damage = self.player.get_damage()
-                    if (enemy.take_hit(damage, self.player.stats.knockback)):
+                    if (enemy.take_hit(damage, self.player.stats.get_stat(self.player.stats.Stat.KNOCKBACK))):
                         self.experience_orbs.append(ExperienceOrb((projectile.x, projectile.y), self.player.camera))
-                    damage_text = DamageText([enemy.x, enemy.y], damage)
-                    self.damage_texts.append(damage_text)
+                        self.player.gain_ubercharge()
+                    self.create_damage_text(enemy.x, enemy.y, damage)
                     break
             if projectile.should_destroy:
                 projectiles_to_destroy.add(projectile)
@@ -1273,8 +1531,9 @@ class Enemy(GameActor):
         # Checks if enemy is pushed out of boundary by the player with knockback
         if (self.knockback_velocity != 0) and (self.x > WIDTH + self.SPRITE_WIDTH / 2 or self.x < -self.SPRITE_WIDTH / 2):
             self.marked_for_death = True
-            # Immediately award player the experience, since experience orbs will not spawn out of bounds
-            self.player.gain_experience() 
+            # Immediately award player the experience and ubercharge, since experience orbs will not spawn out of bounds
+            self.player.gain_experience()
+            self.player.gain_ubercharge() 
 
         # Checks if enemy got out of bounds on its own and just despawn
         elif ((self.x > WIDTH and self.facing_right) or (self.x < 0 and not self.facing_right)):
