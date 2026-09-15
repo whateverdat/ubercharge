@@ -1,5 +1,8 @@
+=============================================================================================================================
 IMPORTANT NOTE: For testing purpose, you can press the "O" key to gain a level and finish the game.
+=============================================================================================================================
 
+=============================================================================================================================
 Installing and running instructions:
 
     1. Optionally create and activate a virtual environment:
@@ -11,7 +14,20 @@ Installing and running instructions:
     2. Install required libraries: "pip install -r requirements.txt".
 
     3. Run the main file: "pgzrun main.py".
+=============================================================================================================================
 
+=============================================================================================================================
+How to play?
+    WASD to move, SPACEBAR to shoot. 
+    Kill the incoming enemies, and collect the dropped xp orbs.
+    Choose an upgrade each time you level up.
+    Fill your ubercharge meter by killing enemies.
+    When ubercharge is active, you get max upgrades for all stats.
+    Reach level 40 as fast as possible to win.
+    There is a difficulty setting in the options menu. 
+=============================================================================================================================
+
+=============================================================================================================================
 Public assets used:
     "16x Tileset, Mostly Flowers" by ArkyonVeil
     "Oleaguid Font" by arynoc
@@ -25,3 +41,4 @@ Public assets used:
     "Osmotic Memory" and "Lonely Echoes" by Tsorthan Grove
     "Win and lose melodies" by Vircon32
     Game by Whateverdat
+=============================================================================================================================
