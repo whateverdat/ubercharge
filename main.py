@@ -144,7 +144,7 @@ class AudioManager:
         AudioManager.currently_playing_track = None
 
     def update_master(self):
-        music.set_volume((self.currently_playing_track.volume * AudioManager.master_volume))
+        music.set_volume((AudioManager.currently_playing_track.volume * AudioManager.master_volume))
 
 # =================================================================================================================
 # Start Scene
@@ -218,8 +218,11 @@ class StartScene(Scene):
         start_y = HEIGHT / 2
         y_increment = 75
         for index, option in enumerate(self.menu_options):
+            center = (WIDTH / 2, start_y + y_increment * index)
+            if (self.state == self.State.CREDITS): # Make room for credits text
+                center = (WIDTH / 2, HEIGHT - HEIGHT / 30)
             self.menu_buttons.append(Button(
-                (WIDTH / 2, start_y + y_increment * index), option
+                center, option
             ))
 
     def _start_shake(self, strength=2):
@@ -287,12 +290,45 @@ class StartScene(Scene):
         for index, button in enumerate(self.menu_buttons):
             if (self.state == self.State.OPTIONS):
                 if (index == 1):
-                    button.text = f"Screen Shake: {"ON" if Camera.shake_active else "OFF"}"
+                    button.text = f"Screen Shake: {'ON' if Camera.shake_active else 'OFF'}"
                 elif (index == 2):
                     button.text = f"Audio: {str(int(AudioManager.master_volume * 100))}%"
                 elif (index == 3):
                     button.text = f"Difficulty: {GameScene.difficulties[GameScene.difficulty]}"
             button.draw()
+
+        if (self.state == self.State.CREDITS):
+            self._draw_credits()
+
+    def _draw_credits(self):
+        assets = [
+            "\"16x Tileset, Mostly Flowers\" by ArkyonVeil",
+            "\"Oleaguid Font\" by arynoc",
+            "\"Set of pixel art projectiles\" by davidaf3",
+            "\"Cat Fighter\", \"Cute Monster\" and \"Skull Monster\" by dogchicken",
+            "\"RPG GUI Selection Arrow\" by INFECTiON656",
+            "\"Grass Tiles\" by Invincible",
+            "\"15 monster grunt/pain/death sounds\" by Michel Baradari",
+            "\"Futuristic SMG\" by Michael Klier",
+            "\"75 CC0 breaking / falling / hit sfx\" by rubberduck",
+            "\"Osmotic Memory\" and \"Lonely Echoes\" by Tsorthan Grove",
+            "\"Win and lose melodies\" by Vircon32",
+            "Game by Whateverdat"
+        ]
+        gap = 72
+
+        for index, asset in enumerate(assets):
+            screen.draw.text(
+                asset,
+                top=((HEIGHT / 3) + gap * (index - (len(assets) / 2 if index > (len(assets) - 1) / 2 else 0))),
+                left=(gap if index < len(assets) / 2 else WIDTH / 2 + gap),
+                width=WIDTH / 2 - gap, 
+                lineheight=1,
+                fontname="oleaguid",
+                fontsize=30,
+                owidth=1,
+            )
+
 
     def on_mouse_move(self, position):
         for button in self.menu_buttons:
@@ -338,7 +374,6 @@ class StartScene(Scene):
                     case _:
                         pass
                     
-
 # =================================================================================================================
 # Button
 # =================================================================================================================
@@ -403,7 +438,7 @@ class GameScene(Scene):
         self.time_elapsed = 0
         self.paused = False
         self.upgrade_buttons = []
-        self.back_button = Button((WIDTH / 2, HEIGHT - HEIGHT / 10), "Back to main menu")
+        self.back_button = Button((WIDTH / 2, HEIGHT - HEIGHT / 10), "Back to Main Menu")
 
     def __str__(self):
         return "GAME SCENE"
@@ -416,10 +451,11 @@ class GameScene(Scene):
         self.upgrade_buttons.clear()
 
         upgrade_count = len(self.player.stats.upgrade_options)
+        y_offset = 70
 
         for index, option in enumerate(self.player.stats.upgrade_options):
             x = WIDTH / (upgrade_count + 1) * (index + 1)
-            y = HEIGHT / 5
+            y = y_offset + (HEIGHT / 5)
 
             self.upgrade_buttons.append(
                 Button((x, y), option.display_name)
@@ -427,10 +463,13 @@ class GameScene(Scene):
 
     def _draw_ui(self):
         screen.draw.filled_rect(self.player.get_experience_rect(), "yellow")
-        screen.draw.filled_rect(self.player.get_ubercharge_rect(), "red")
+        screen.draw.filled_rect(
+            self.player.get_ubercharge_rect(),
+            "yellow" if (self.player.current_frame % 2 == 0 and self.player.stats.ubercharge) else "red" # This is a quick hack that should be fixed later
+        )
             
         screen.draw.text(
-            f"{str(self.player.level)}", center=(WIDTH / 2, HEIGHT / 30), 
+            f"{str(self.player.level)}/{self.player.level_cap}", center=(WIDTH / 2, HEIGHT / 30), 
             fontname="oleaguid", fontsize=32, color="white", owidth=1
         )
 
@@ -447,7 +486,7 @@ class GameScene(Scene):
 
         if (self.choosing_upgrade):
             screen.draw.text(
-                f"Choose an upgrade:", center=(WIDTH / 2, HEIGHT / 10), 
+                f"------------------ Level Up! Choose an Upgrade Below ------------------", center=(WIDTH / 2, HEIGHT / 5), 
                 fontname="oleaguid", fontsize=32, color="white", owidth=1
             )
             self._draw_stat_information()
@@ -457,21 +496,34 @@ class GameScene(Scene):
         if (self.paused): 
             self._draw_stat_information()
             screen.draw.text(
-                f"PAUSED", center=(WIDTH / 2, HEIGHT / 10), 
+                f"Paused", center=(WIDTH / 2, HEIGHT / 10), 
                 fontname="oleaguid", fontsize=32, color="white", owidth=1
             )
             self.back_button.draw()
 
     def _draw_stat_information(self):
+        y_offset = 100
+        gap = 100
+        screen.draw.text(
+            "-------------------------------- Stats ---------------------------------",
+            center=(
+                WIDTH / 2,
+                y_offset / 2.5 + (HEIGHT / 3)
+            ),
+            fontname="oleaguid",
+            fontsize=32,
+            color="white",
+            owidth=1
+        )
         for index, stat in enumerate(self.player.stats.all_stats):
             column = index % 3
             row = index // 3
 
             screen.draw.text(
-                f"{stat.display_name}: {stat.values.index(getattr(self.player.stats, PlayerStats.stat_attributes[stat]))}",
+                f"{stat.display_name}: {stat.values.index(getattr(self.player.stats, PlayerStats.stat_attributes[stat]))}/{stat.max_level}",
                 center=(
                     WIDTH / 4 + column * (WIDTH / 4),
-                    HEIGHT / 3 + row * 100
+                    y_offset + (HEIGHT / 3 + row * gap)
                 ),
                 fontname="oleaguid",
                 fontsize=32,
@@ -488,7 +540,7 @@ class GameScene(Scene):
         self.time_elapsed += dt
 
         if (self.player.check_game_over()):
-            self.game.scene_manager.change_scene(TitleScene(self.game, self.time_elapsed, True if self.player.health > 0 else False))
+            self.game.scene_manager.change_scene(TitleScene(self.game, self.time_elapsed, True if self.player.health > 0 else False, self.difficulties[self.difficulty], self.player.level))
         
         self.player.update(keyboard, dt)
         self.enemy_manager.update(dt)
@@ -534,35 +586,41 @@ class GameScene(Scene):
 # Title Scene
 # ==================================================================================================================
 class TitleScene(Scene):
-    def __init__(self, game, time, win):
+    def __init__(self, game, time, win, difficulty, level):
         super().__init__(game)
 
         self.camera = Camera()
         self.audio_manager = AudioManager()
 
+        self.level = level
         self.win = win
+        self.difficulty = difficulty
         self.audio_manager.stop_track()
         self.audio_manager.play_sound(self.audio_manager.Sound.WIN if win else self.audio_manager.Sound.LOSE)
         self.time = time
 
         self.background = GameActor("background", [WIDTH / 2, HEIGHT / 2], camera=self.camera)
-        self.back_button = Button((WIDTH / 2, HEIGHT - HEIGHT / 10), "Back to main menu")
+        self.back_button = Button((WIDTH / 2, HEIGHT - HEIGHT / 10), "Back to Main Menu")
 
     def draw(self):
         self.background.draw()
         if (self.win):
             screen.draw.text(
-                f"YOU WIN!", center=(WIDTH / 2, HEIGHT / 10), 
-                fontname="oleaguid", fontsize=96, color="white", owidth=1
+                f"You Win!", center=(WIDTH / 2, HEIGHT / 2), 
+                fontname="oleaguid", fontsize=64, color="white", owidth=1
             )
             screen.draw.text(
-                f"Your time: {self.time:.3f}s", center=(WIDTH / 2, HEIGHT / 2), 
-                fontname="oleaguid", fontsize=64, color="white", owidth=1
+                f"Your time is {self.time:.3f} seconds on {self.difficulty} difficulty", center=(WIDTH / 2, HEIGHT / 1.5), 
+                fontname="oleaguid", fontsize=32, color="white", owidth=1
             )
         else:
             screen.draw.text(
-                f"GAME OVER!", center=(WIDTH / 2, HEIGHT / 2), 
-                fontname="oleaguid", fontsize=96, color="white", owidth=1
+                f"Game Over!", center=(WIDTH / 2, HEIGHT / 2), 
+                fontname="oleaguid", fontsize=64, color="white", owidth=1
+            )
+            screen.draw.text(
+                f"Your reached level {self.level} in {self.time:.3f} seconds, on {self.difficulty} difficulty", center=(WIDTH / 2, HEIGHT / 1.5), 
+                fontname="oleaguid", fontsize=32, color="white", owidth=1
             )
 
         self.back_button.draw()
@@ -866,6 +924,7 @@ class PlayerStats:
             self.values = values
             self.start_value = values[0]
             self.ubercharge_value = values[-1]
+            self.max_level = len(values) - 1
             self.display_name = display_name
 
     stat_attributes = {
